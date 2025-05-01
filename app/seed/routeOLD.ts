@@ -2,8 +2,9 @@ import bcrypt from 'bcrypt';
 import postgres from 'postgres';
 import { invoices, customers, revenue, users } from '../lib/placeholder-data';
 
-// Define las funciones de seed pero haz que acepten la instancia 'sql' como argumento
-async function seedUsers(sql: postgres.Sql) {
+const sql = postgres(process.env.POSTGRES_URL!, { ssl: 'require' });
+
+async function seedUsers() {
   await sql`CREATE EXTENSION IF NOT EXISTS "uuid-ossp"`;
   await sql`
     CREATE TABLE IF NOT EXISTS users (
@@ -13,7 +14,6 @@ async function seedUsers(sql: postgres.Sql) {
       password TEXT NOT NULL
     );
   `;
-  console.log(`Created "users" table`);
 
   const insertedUsers = await Promise.all(
     users.map(async (user) => {
@@ -25,12 +25,13 @@ async function seedUsers(sql: postgres.Sql) {
       `;
     }),
   );
-  console.log(`Seeded ${insertedUsers.length} users`);
+
   return insertedUsers;
 }
 
-async function seedInvoices(sql: postgres.Sql) {
+async function seedInvoices() {
   await sql`CREATE EXTENSION IF NOT EXISTS "uuid-ossp"`;
+
   await sql`
     CREATE TABLE IF NOT EXISTS invoices (
       id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
@@ -40,7 +41,6 @@ async function seedInvoices(sql: postgres.Sql) {
       date DATE NOT NULL
     );
   `;
-  console.log(`Created "invoices" table`);
 
   const insertedInvoices = await Promise.all(
     invoices.map(
@@ -51,12 +51,13 @@ async function seedInvoices(sql: postgres.Sql) {
       `,
     ),
   );
-  console.log(`Seeded ${insertedInvoices.length} invoices`);
+
   return insertedInvoices;
 }
 
-async function seedCustomers(sql: postgres.Sql) {
+async function seedCustomers() {
   await sql`CREATE EXTENSION IF NOT EXISTS "uuid-ossp"`;
+
   await sql`
     CREATE TABLE IF NOT EXISTS customers (
       id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
@@ -65,7 +66,6 @@ async function seedCustomers(sql: postgres.Sql) {
       image_url VARCHAR(255) NOT NULL
     );
   `;
-  console.log(`Created "customers" table`);
 
   const insertedCustomers = await Promise.all(
     customers.map(
@@ -76,18 +76,17 @@ async function seedCustomers(sql: postgres.Sql) {
       `,
     ),
   );
-  console.log(`Seeded ${insertedCustomers.length} customers`);
+
   return insertedCustomers;
 }
 
-async function seedRevenue(sql: postgres.Sql) {
+async function seedRevenue() {
   await sql`
     CREATE TABLE IF NOT EXISTS revenue (
       month VARCHAR(4) NOT NULL UNIQUE,
       revenue INT NOT NULL
     );
   `;
-  console.log(`Created "revenue" table`);
 
   const insertedRevenue = await Promise.all(
     revenue.map(
@@ -98,36 +97,21 @@ async function seedRevenue(sql: postgres.Sql) {
       `,
     ),
   );
-  console.log(`Seeded ${insertedRevenue.length} revenue entries`);
+
   return insertedRevenue;
 }
 
-// La función GET ahora maneja la conexión y la transacción
 export async function GET() {
-  let sql: postgres.Sql | null = null; // Declara sql fuera del try para poder usarlo en finally
   try {
-    // Conecta a la base de datos DENTRO del handler
-    sql = postgres(process.env.POSTGRES_URL!, { ssl: 'require' });
+    const result = await sql.begin((sql) => [
+      seedUsers(),
+      seedCustomers(),
+      seedInvoices(),
+      seedRevenue(),
+    ]);
 
-    console.log('Seeding database...');
-    // Usa una transacción y pasa la instancia 'sql' a las funciones seed
-    await sql.begin(async (sql) => {
-        await seedUsers(sql);
-        await seedCustomers(sql);
-        await seedInvoices(sql);
-        await seedRevenue(sql);
-    });
-    console.log('Database seeding completed successfully.');
     return Response.json({ message: 'Database seeded successfully' });
-
   } catch (error) {
-    console.error('Error seeding database:', error);
-    return Response.json({ message: 'Failed to seed database', error: (error as Error).message }, { status: 500 });
-  } finally {
-    // Asegúrate de cerrar la conexión si se abrió
-    if (sql) {
-      await sql.end().catch(console.error); // Intenta cerrar, registra error si falla el cierre
-      console.log('Database connection closed.');
-    }
+    return Response.json({ error }, { status: 500 });
   }
 }
